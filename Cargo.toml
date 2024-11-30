@@ -1,0 +1,10 @@
+[package]
+name = "rpgmad-lib"
+version = "1.0.1"
+edition = "2021"
+
+[features]
+rayon = ["dep:rayon"]
+
+[dependencies]
+rayon = { version = "1.10.0", optional = true }
