@@ -1,7 +1,14 @@
 [package]
 name = "rpgmad-lib"
 version = "1.0.1"
+authors = ["savannstm <savannstm@gmail.com>"]
 edition = "2021"
+rust-version = "1.60.0"
+description = "A decrypter implementation for rpgm-archive-decrypter. Not intended for use in other applications; but can be."
+readme = "README.md"
+repository = "https://github.com/savannstm/rpgm-archive-decrypter-lib"
+documentation = "https://docs.rs/rpgmad-lib"
+license-file = "LICENSE.md"
 
 [features]
 rayon = ["dep:rayon"]
