@@ -10,7 +10,7 @@ let archive_bytes = std::fs::read("C:/Documents/Game/Game.rgssad");
 let mut decrypter = rpgmad_lib::Decrypter::new();
 
 // Writes decrypted game files to "C:/Documents/Game"
-decrypter.decrypt("C:/Documents/Game", false).unwrap()
+decrypter.extract("C:/Documents/Game", false).unwrap()
 ```
 
 ## License
