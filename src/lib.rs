@@ -1,5 +1,6 @@
 //!A decrypter implementation for rpgm-archive-decrypter. Not intended for use in other applications; but can be.
 
+use arrayvec::ArrayVec;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 #[cfg(feature = "rayon")]
@@ -23,12 +24,10 @@ enum SeekFrom {
 
 impl std::fmt::Display for Engine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let variant_name: &str = match self {
-            Engine::Older => "XP/VX",
-            Engine::VXAce => "VXAce",
-        };
-
-        write!(f, "{}", variant_name)
+        match self {
+            Engine::Older => write!(f, "XP/VX"),
+            Engine::VXAce => write!(f, "VXAce"),
+        }
     }
 }
 
@@ -44,22 +43,26 @@ impl VecWalker {
         VecWalker { data, pos: 0, len }
     }
 
+    #[inline]
     pub fn advance(&mut self, bytes: usize) -> &[u8] {
         self.pos += bytes;
         &self.data[self.pos - bytes..self.pos]
     }
 
-    pub fn read_chunk(&mut self) -> [u8; 4] {
+    #[inline]
+    pub fn read_i32(&mut self) -> i32 {
         let chunk: &[u8] = self.advance(4);
-        unsafe { *(chunk.as_ptr() as *const [u8; 4]) }
+        i32::from_le_bytes(unsafe { *(chunk.as_ptr() as *const [u8; 4]) })
     }
 
+    #[inline]
     pub fn read_byte(&mut self) -> u8 {
         self.pos += 1;
         self.data[self.pos - 1]
     }
 
-    pub fn seek(&mut self, offset: usize, seek_from: SeekFrom) {
+    #[inline]
+    pub const fn seek(&mut self, offset: usize, seek_from: SeekFrom) {
         self.pos = match seek_from {
             SeekFrom::Start => offset,
             SeekFrom::Current => self.pos + offset,
@@ -77,20 +80,24 @@ struct Archive {
 pub struct Decrypter {
     walker: UnsafeCell<VecWalker>,
     key: u32,
+    key_bytes: [u8; 4],
     engine: Engine,
 }
 
 impl Decrypter {
     /// Creates a new decrypter for specified archive binary data.
     pub fn new(bytes: Vec<u8>) -> Self {
+        let key: u32 = 0xDEADCAFE;
         Self {
             walker: UnsafeCell::new(VecWalker::new(bytes)),
-            key: 0xDEADCAFE,
+            key,
+            key_bytes: key.to_le_bytes(),
             engine: Engine::Older,
         }
     }
 
     /// Extracts archive to `output_path`. Does nothing if extracted files already exist and `force` is set to `false`.
+    #[inline]
     pub fn extract<P: AsRef<Path>>(&mut self, output_path: P, force: bool) -> Result<(), &str> {
         let walker: &mut VecWalker = unsafe { &mut *self.walker.get() };
 
@@ -105,21 +112,19 @@ impl Decrypter {
             walker.read_byte()
         };
 
-        self.engine = if version == 1 {
-            Engine::Older
-        } else if version == 3 {
-            Engine::VXAce
-        } else {
-            return Err("Unknown archive game engine. Archive is possibly corrupted.");
+        self.engine = match version {
+            1 => Engine::Older,
+            3 => Engine::VXAce,
+            _ => return Err("Unknown archive game engine. Archive is possibly corrupted."),
         };
 
-        let archives: Vec<Archive> = self.read_archive();
+        let archives: ArrayVec<Archive, 2048> = self.read_archive();
 
         #[cfg(feature = "rayon")]
         let arc: Arc<Mutex<&mut VecWalker>> = Arc::new(Mutex::new(walker));
 
         #[cfg(feature = "rayon")]
-        let archives = archives.into_par_iter();
+        let archives = archives.into_iter().par_bridge();
 
         #[cfg(not(feature = "rayon"))]
         let archives = archives.into_iter();
@@ -156,6 +161,13 @@ impl Decrypter {
         Ok(())
     }
 
+    #[inline]
+    fn update_key(&mut self, new_key: u32) {
+        self.key = new_key;
+        self.key_bytes = new_key.to_le_bytes();
+    }
+
+    #[inline]
     fn decrypt_archive(data: &[u8], mut key: u32) -> Vec<u8> {
         let mut decrypted: Vec<u8> = Vec::with_capacity(data.len());
 
@@ -176,21 +188,22 @@ impl Decrypter {
         decrypted
     }
 
+    #[inline]
     fn decrypt_integer(&mut self, value: i32) -> i32 {
         let result: i32 = value ^ self.key as i32;
 
         if self.engine == Engine::Older {
-            self.key = self.key.wrapping_mul(7).wrapping_add(3);
+            self.update_key(self.key.wrapping_mul(7).wrapping_add(3));
         }
 
         result
     }
 
+    #[inline]
     fn decrypt_filename(&mut self, filename: &[u8]) -> String {
         let mut decrypted: Vec<u8> = Vec::with_capacity(filename.len());
 
         if self.engine == Engine::VXAce {
-            let key_bytes: [u8; 4] = self.key.to_le_bytes();
             let mut j: usize = 0;
 
             for item in filename {
@@ -198,67 +211,62 @@ impl Decrypter {
                     j = 0;
                 }
 
-                decrypted.push(item ^ key_bytes[j]);
+                decrypted.push(item ^ self.key_bytes[j]);
                 j += 1;
             }
         } else {
             for item in filename {
-                decrypted.push(item ^ (self.key & 0xff) as u8);
-                self.key = self.key.wrapping_mul(7).wrapping_add(3);
+                decrypted.push(item ^ self.key as u8);
+                self.update_key(self.key.wrapping_mul(7).wrapping_add(3));
             }
         }
 
+        //? probably non-utf8 support?
         String::from_utf8(decrypted).unwrap()
     }
 
-    fn read_archive(&mut self) -> Vec<Archive> {
+    #[inline]
+    fn read_archive(&mut self) -> ArrayVec<Archive, 2048> {
         let walker: &mut VecWalker = unsafe { &mut *self.walker.get() };
 
         if self.engine == Engine::VXAce {
             // 0xDEADCAFE key is not ever used and overwritten.
-            self.key = u32::from_le_bytes(walker.read_chunk())
-                .wrapping_mul(9)
-                .wrapping_add(3);
+            self.update_key((walker.read_i32() as u32).wrapping_mul(9).wrapping_add(3));
         }
 
-        let mut archives: Vec<Archive> = Vec::with_capacity(1024);
+        let mut archives: ArrayVec<Archive, 2048> = ArrayVec::new();
 
         loop {
-            let (filename, size, offset, key) = if self.engine == Engine::VXAce {
-                let offset: usize =
-                    self.decrypt_integer(i32::from_le_bytes(walker.read_chunk())) as usize;
+            let (filename, size, offset, key) = match self.engine {
+                Engine::VXAce => {
+                    let offset: usize = self.decrypt_integer(walker.read_i32()) as usize;
+                    let size: i32 = self.decrypt_integer(walker.read_i32());
+                    let key: u32 = self.decrypt_integer(walker.read_i32()) as u32;
+                    let length: i32 = self.decrypt_integer(walker.read_i32());
 
-                let size: i32 = self.decrypt_integer(i32::from_le_bytes(walker.read_chunk()));
+                    if offset == 0 {
+                        break;
+                    }
 
-                let key: u32 = self.decrypt_integer(i32::from_le_bytes(walker.read_chunk())) as u32;
-
-                let length: i32 = self.decrypt_integer(i32::from_le_bytes(walker.read_chunk()));
-
-                if offset == 0 {
-                    break;
+                    let filename: String = self.decrypt_filename(walker.advance(length as usize));
+                    (filename, size, offset, key)
                 }
+                Engine::Older => {
+                    let length: i32 = self.decrypt_integer(walker.read_i32());
+                    let filename: String = self.decrypt_filename(walker.advance(length as usize));
+                    let size: i32 = self.decrypt_integer(walker.read_i32());
 
-                let filename: String = self.decrypt_filename(walker.advance(length as usize));
+                    let offset: usize = walker.pos;
+                    let key: u32 = self.key;
 
-                (filename, size, offset, key)
-            } else {
-                let length: i32 = self.decrypt_integer(i32::from_le_bytes(walker.read_chunk()));
+                    walker.seek(size as usize, SeekFrom::Current);
 
-                let filename: String = self.decrypt_filename(walker.advance(length as usize));
+                    if walker.pos == walker.len {
+                        break;
+                    }
 
-                let size: i32 = self.decrypt_integer(i32::from_le_bytes(walker.read_chunk()));
-
-                let offset: usize = walker.pos;
-
-                let key: u32 = self.key;
-
-                walker.seek(size as usize, SeekFrom::Current);
-
-                if walker.pos == walker.len {
-                    break;
+                    (filename, size, offset, key)
                 }
-
-                (filename, size, offset, key)
             };
 
             archives.push(Archive {
