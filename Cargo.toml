@@ -1,18 +1,18 @@
 [package]
 name = "rpgmad-lib"
-version = "1.0.2"
+version = "2.0.0"
 authors = ["savannstm <savannstm@gmail.com>"]
 edition = "2021"
 rust-version = "1.60.0"
-description = "A decrypter implementation for rpgm-archive-decrypter. Not intended for use in other applications; but can be."
+description = "Library for decrypting RPG Maker `rgss` archives."
 readme = "README.md"
 repository = "https://github.com/savannstm/rpgm-archive-decrypter-lib"
 documentation = "https://docs.rs/rpgmad-lib"
 license-file = "LICENSE.md"
 
-[features]
-rayon = ["dep:rayon"]
-
 [dependencies]
-arrayvec = "0.7.6"
-rayon = { version = "1.10.0", optional = true }
+thiserror = "1.0.65"
+
+[dev-dependencies]
+marshal-rs = "0.4.0"
+png = "0.17.16"

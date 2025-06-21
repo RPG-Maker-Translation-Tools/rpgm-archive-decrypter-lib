@@ -1,16 +1,26 @@
 # rpgm-archive-decrypter-lib
 
-A decrypter implementation for [rpgm-archive-decrypter](https://github.com/savannstm/rpgm-archive-decrypter).
-Not intended for use in other applications; but can be.
+Library for decrypting RPG Maker `rgss` archives.
 
-## Quick example
+Used in [rpgm-archive-decrypter](https://github.com/savannstm/rpgm-archive-decrypter).
+
+## Example
 
 ```rust
-let archive_bytes = std::fs::read("C:/Documents/Game/Game.rgssad");
-let mut decrypter = rpgmad_lib::Decrypter::new();
+use rpgmad_lib::{Decrypter, extract_archive};
 
-// Writes decrypted game files to "C:/Documents/Game"
-decrypter.extract("C:/Documents/Game", false).unwrap()
+// Using Decrypter struct
+let archive_content: Vec<u8> = std::fs::read("C:/Game/Game.rgss3a").unwrap();
+let mut decrypter = Decrypter::new();
+
+// You can optionally set force
+// decrypter.set_force(true)
+
+decrypter.extract(&archive_content, "C:/Game").unwrap();
+
+// Using function
+// let force = false; // When `true`, it will overwrite existing files in the game directory.
+// extract_archive(&archive_content, "C:/Game", force).unwrap();
 ```
 
 ## License
