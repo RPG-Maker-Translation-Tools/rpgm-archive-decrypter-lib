@@ -16,7 +16,7 @@ strum_macros = "0.27.2"
 thiserror = "2.0.17"
 
 [dev-dependencies]
-marshal-rs = "1.1.1"
+marshal-rs = "2.0.0"
 
 [features]
 serde = ["dep:serde"]
