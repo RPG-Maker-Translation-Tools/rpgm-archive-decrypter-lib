@@ -1,9 +1,9 @@
 [package]
 name = "rpgmad-lib"
-version = "4.0.0"
+version = "5.0.0"
 authors = ["savannstm <savannstm@gmail.com>"]
 edition = "2021"
-rust-version = "1.68.0"
+rust-version = "1.71.0"
 description = "Library for decrypting/encrypting RPG Maker `rgss` archives."
 readme = "README.md"
 repository = "https://github.com/savannstm/rpgm-archive-decrypter-lib"
@@ -11,12 +11,14 @@ documentation = "https://docs.rs/rpgmad-lib"
 license-file = "LICENSE.md"
 
 [dependencies]
-serde = { version = "1.0.228", optional = true }
-strum_macros = "0.27.2"
-thiserror = "2.0.17"
+serde = { version = "1.0.228", features = ["derive"], optional = true }
+strum_macros = "0.28.0"
+thiserror = { version = "2.0.18", default-features = false, features = [] }
 
 [dev-dependencies]
 marshal-rs = "2.0.0"
 
 [features]
+default = ["std"]
+std = ["thiserror/std"]
 serde = ["dep:serde"]

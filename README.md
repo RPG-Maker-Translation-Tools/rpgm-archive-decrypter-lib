@@ -2,28 +2,24 @@
 
 **BLAZINGLY** :fire: fast and tiny library for decrypting RPG Maker XP/VX/VXAce `.rgssad`/`.rgss2a`/`.rgss3a` archives.
 
-This project essentially is a rewrite of uuksu's [RPGMakerDecrypter](https://github.com/uuksu/RPGMakerDecrypter) in Rust as a library, but it also implements archive encryption.
+This project essentially is a rewrite of uuksu's [RPGMakerDecrypter](https://github.com/uuksu/RPGMakerDecrypter) in Rust as a library, but it also implements archive encryption, **and** can be run in no_std environments.
 
 And since it's implemented in Rust 🦀🦀🦀, it's also very tiny, clean, and performant.
 
-Used in my [rpgm-archive-decrypter](https://github.com/savannstm/rpgm-archive-decrypter) CLI tool.
+Used in my [rpgm-archive-decrypter](https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter) CLI tool and [RPGMTranslate](https://github.com/RPG-Maker-Translation-Tools/rpgmtranslate-qt).
 
 ## Example
 
 ### Decrypt
 
 ```rust no_run
-use rpgmad_lib::{Decrypter, decrypt_archive};
+use rpgmad_lib::{Decrypter};
 use std::{path::PathBuf, fs::{read, write, create_dir_all}};
 
-let archive_content: Vec<u8> = read("C:/Game/Game.rgss3a").unwrap();
+let mut archive_content: Vec<u8> = read("C:/Game/Game.rgss3a").unwrap();
 
-// Using Decrypter struct
 let mut decrypter = Decrypter::new();
-let decrypted_entries = decrypter.decrypt(&archive_content).unwrap();
-
-// Using function
-let decrypted_entries = decrypt_archive(&archive_content).unwrap();
+let decrypted_entries = decrypter.decrypt(&mut archive_content).unwrap();
 
 for entry in decrypted_entries {
     let path = String::from_utf8_lossy(&entry.path);
@@ -40,23 +36,30 @@ for entry in decrypted_entries {
 ### Encrypt
 
 ```rust no_run
-use rpgmad_lib::{Decrypter, encrypt_archive, ArchiveEntry, Engine};
+use rpgmad_lib::{Decrypter, ArchiveEntry, Engine};
 use std::{fs::{read, write}, borrow::Cow};
 
+let data = read("Graphics/Tilesets/Tileset1.png").unwrap();
 let archive_entries = [ArchiveEntry {
-    path: Cow::Borrowed(b"Graphics/Tilesets/Tileset1.png"),
-    data: read("Graphics/Tilesets/Tileset1.png").unwrap()
+    path: b"Graphics/Tilesets/Tileset1.png",
+    data: &data
 }];
 
-// Using Decrypter struct
 let mut decrypter = Decrypter::new();
-let archive_data = decrypter.encrypt(&archive_entries, Engine::VXAce);
 
-// Using function
-let archive_data = encrypt_archive(&archive_entries, Engine::VXAce);
+let encrypted_buffer_size = Decrypter::encrypted_buffer_size(&archive_entries, Engine::VXAce);
+let mut archive_buffer = Vec::new();
+archive_buffer.resize(encrypted_buffer_size, 0);
 
-write("./Game.rgss3a", archive_data).unwrap();
+decrypter.encrypt(&archive_entries, Engine::VXAce, &mut archive_buffer);
+
+write("./Game.rgss3a", archive_buffer).unwrap();
 ```
+
+## Features
+
+- `default` - default feature enables the usage of `std`. If you're using this crate in a `no_std` environment for some reason, you need to disable default feature.
+- `serde` - enables serde serialization/deserialization for `Error` type.
 
 ## Support
 
@@ -64,9 +67,9 @@ write("./Game.rgss3a", archive_data).unwrap();
 
 If you could, please consider supporting us through:
 
--   [Ko-fi](https://ko-fi.com/savannstm)
--   [Patreon](https://www.patreon.com/cw/savannstm)
--   [Boosty](https://boosty.to/mcdeimos)
+- [Ko-fi](https://ko-fi.com/savannstm)
+- [Patreon](https://www.patreon.com/cw/savannstm)
+- [Boosty](https://boosty.to/mcdeimos)
 
 Even if you don't, it's fine. We'll continue to do as we right now.
 
