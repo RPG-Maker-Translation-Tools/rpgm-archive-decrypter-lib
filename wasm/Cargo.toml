@@ -1,0 +1,16 @@
+[package]
+name = "rpgmard-wasm"
+version = "0.1.0"
+authors = ["savannstm <savannstm@gmail.com>"]
+edition = "2021"
+rust-version = "1.71.0"
+description = "WASM bindings for rpgmad-lib."
+license-file = "../LICENSE.md"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rpgmad-lib = { path = ".." }
+wasm-bindgen = "=0.2.127"
