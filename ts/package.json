@@ -1,0 +1,55 @@
+{
+    "name": "rpgmard-lib",
+    "version": "5.0.0",
+    "description": "Library for decrypting/encrypting RPG Maker `rgss` archives.",
+    "keywords": [
+        "rpg-maker",
+        "rgssad",
+        "rgss2a",
+        "rgss3a",
+        "decrypt",
+        "encrypt",
+        "archive"
+    ],
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE.md"
+    ],
+    "engines": {
+        "node": ">=18"
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.build.json",
+        "check": "tsc",
+        "test": "node --test \"tests/**/*.test.ts\"",
+        "fmt": "prettier --write .",
+        "fmt:check": "prettier --check .",
+        "prepublishOnly": "npm run build"
+    },
+    "author": "savannstm <savannstm@gmail.com>",
+    "license": "WTFPL",
+    "homepage": "https://github.com/savannstm/rpgm-archive-decrypter-lib/tree/main/ts#readme",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/savannstm/rpgm-archive-decrypter-lib.git",
+        "directory": "ts"
+    },
+    "bugs": {
+        "url": "https://github.com/savannstm/rpgm-archive-decrypter-lib/issues"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.3",
+        "@types/node": "^22.10.5",
+        "prettier": "^3.9.6"
+    }
+}
