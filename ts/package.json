@@ -48,8 +48,8 @@
         "url": "https://github.com/savannstm/rpgm-archive-decrypter-lib/issues"
     },
     "devDependencies": {
-        "typescript": "^5.7.3",
-        "@types/node": "^22.10.5",
+        "typescript": "^6.0.3",
+        "@types/node": "^18.19.130",
         "prettier": "^3.9.6"
     }
 }
