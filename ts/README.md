@@ -6,7 +6,7 @@ TypeScript port of the [`rpgmad-lib`](https://github.com/savannstm/rpgm-archive-
 
 Used in my [rpgm-archive-decrypter](https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter) CLI tool and [RPGMTranslate](https://github.com/RPG-Maker-Translation-Tools/rpgmtranslate-qt).
 
-Pure `Uint8Array`/`DataView`, no runtime-specific APIs — works the same under Node, Bun, and Deno.
+Pure `Uint8Array`/`DataView`, no runtime-specific APIs - works the same under Node, Bun, and Deno.
 
 ## Install
 
