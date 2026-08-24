@@ -19,11 +19,7 @@ use thiserror::Error;
 
 fn memcpy(dst: &mut [u8], src: &[u8]) {
     unsafe {
-        core::ptr::copy_nonoverlapping(
-            src.as_ptr(),
-            dst.as_mut_ptr(),
-            src.len(),
-        );
+        core::ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), src.len());
     }
 }
 
@@ -48,17 +44,13 @@ pub const VXACE_RGSS3A_EXT: &str = "rgss3a";
 #[derive(Debug, Error)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub enum ExtractError {
-    #[error(
-        "Invalid archive file header: {0:?}. Expected: RGSSAD␀ ([82, 71, 83, 83, 65, 68, 0])"
-    )]
+    #[error("Invalid archive file header: {0:?}. Expected: RGSSAD␀ ([82, 71, 83, 83, 65, 68, 0])")]
     InvalidHeader([u8; 7]),
-    #[error(
-        "Invalid game engine byte: {0}. Expected `1` for XP/VX or `3` for VX Ace."
-    )]
+    #[error("Invalid game engine byte: {0}. Expected `1` for XP/VX or `3` for VX Ace.")]
     InvalidEngine(u8),
 }
 
-#[derive(Debug, Display, EnumIs, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, Display, EnumIs, PartialEq)]
 pub enum Engine {
     #[strum(to_string = "XP/VX")]
     Older = 1,
@@ -132,9 +124,7 @@ impl<'a> Decrypter<'a> {
     #[inline]
     fn read_u32(&mut self) -> u32 {
         let chunk = self.read_bytes(sizeof!(u32));
-        u32::from_le_bytes(unsafe {
-            *chunk.as_ptr().cast::<[u8; sizeof!(u32)]>()
-        })
+        u32::from_le_bytes(unsafe { *chunk.as_ptr().cast::<[u8; sizeof!(u32)]>() })
     }
 
     #[inline]
@@ -172,9 +162,7 @@ impl<'a> Decrypter<'a> {
     #[inline]
     /// Decrypts path if `path_data` is encrypted, encrypts path if `path_data` is decrypted.
     fn xor_path_vxace(&mut self, path_data: &mut [u8]) {
-        for (idx, byte) in
-            (unsafe { &*(path_data as *mut [u8]) }).iter().enumerate()
-        {
+        for (idx, byte) in (unsafe { &*(path_data as *mut [u8]) }).iter().enumerate() {
             // Compiler is smart and can optimize this modulo into `& 0b11`.
             // Since modulo is more self-descriptive, let it be here.
             path_data[idx] = byte ^ self.key_bytes[idx % 4];
@@ -184,9 +172,7 @@ impl<'a> Decrypter<'a> {
     #[inline]
     /// Decrypts path if `path_data` is encrypted, encrypts path if `path_data` is decrypted.
     fn xor_path_older(&mut self, path_data: &mut [u8]) {
-        for (idx, byte) in
-            (unsafe { &*(path_data as *mut [u8]) }).iter().enumerate()
-        {
+        for (idx, byte) in (unsafe { &*(path_data as *mut [u8]) }).iter().enumerate() {
             path_data[idx] = byte ^ self.key as u8;
             self.update_key_older();
         }
@@ -199,9 +185,7 @@ impl<'a> Decrypter<'a> {
         let mut key_byte_pos = 0;
 
         // Decrypting data
-        for (idx, data_byte) in
-            (unsafe { &*(data as *mut [u8]) }).iter().enumerate()
-        {
+        for (idx, data_byte) in (unsafe { &*(data as *mut [u8]) }).iter().enumerate() {
             if key_byte_pos == 4 {
                 key_byte_pos = 0;
                 key = key.wrapping_mul(7).wrapping_add(3);
@@ -246,7 +230,7 @@ impl<'a> Decrypter<'a> {
             self.update_key_vxace();
         }
 
-        iter::from_fn(move  || {
+        iter::from_fn(move || {
             let mut u32: u32;
 
             if self.engine.is_vx_ace() {
@@ -267,10 +251,7 @@ impl<'a> Decrypter<'a> {
                 u32 = self.read_u32();
                 let path_size = self.xor_u32_vxace(u32) as usize;
 
-                let path_data = unsafe {
-                    &mut *(self.read_bytes(path_size) as *const [u8]
-                        as *mut [u8])
-                };
+                let path_data = unsafe { &mut *(self.read_bytes(path_size) as *const [u8] as *mut [u8]) };
 
                 self.xor_path_vxace(path_data);
 
@@ -280,10 +261,7 @@ impl<'a> Decrypter<'a> {
                 // Read data
                 self.seek_byte(SeekFrom::Start(data_offset));
 
-                let entry_data = unsafe {
-                    &mut *(self.read_bytes(data_size) as *const [u8]
-                        as *mut [u8])
-                };
+                let entry_data = unsafe { &mut *(self.read_bytes(data_size) as *const [u8] as *mut [u8]) };
                 Self::xor_data(entry_key, entry_data);
 
                 let entry = ArchiveEntry {
@@ -304,10 +282,7 @@ impl<'a> Decrypter<'a> {
                 u32 = self.read_u32();
                 let path_size = self.xor_u32_older(u32) as usize;
 
-                let path_data = unsafe {
-                    &mut *(self.read_bytes(path_size) as *const [u8]
-                        as *mut [u8])
-                };
+                let path_data = unsafe { &mut *(self.read_bytes(path_size) as *const [u8] as *mut [u8]) };
 
                 self.xor_path_older(path_data);
 
@@ -325,10 +300,7 @@ impl<'a> Decrypter<'a> {
                 // Seek back to the data and read it
                 self.seek_byte(SeekFrom::Start(data_offset));
 
-                let entry_data = unsafe {
-                    &mut *(self.read_bytes(data_size) as *const [u8]
-                        as *mut [u8])
-                };
+                let entry_data = unsafe { &mut *(self.read_bytes(data_size) as *const [u8] as *mut [u8]) };
                 Self::xor_data(entry_key, entry_data);
 
                 let entry = ArchiveEntry {
@@ -344,11 +316,7 @@ impl<'a> Decrypter<'a> {
         })
     }
 
-    fn encrypt_entries(
-        &mut self,
-        entries: &[ArchiveEntry],
-        archive_buffer: &mut [u8],
-    ) {
+    fn encrypt_entries(&mut self, entries: &[ArchiveEntry], archive_buffer: &mut [u8]) {
         let mut offset = 8;
 
         if self.engine.is_vx_ace() {
@@ -369,25 +337,16 @@ impl<'a> Decrypter<'a> {
 
                 let data_size = entry.data.len() as u32;
                 let encoded_data_size = self.xor_u32_vxace(data_size);
-                memcpy(
-                    &mut archive_buffer[offset..],
-                    &encoded_data_size.to_le_bytes(),
-                );
+                memcpy(&mut archive_buffer[offset..], &encoded_data_size.to_le_bytes());
                 offset += 4;
 
                 // self.key ^ self.key = 0
-                memcpy(
-                    &mut archive_buffer[offset..],
-                    &ENCRYPTION_KEY.to_le_bytes(),
-                );
+                memcpy(&mut archive_buffer[offset..], &ENCRYPTION_KEY.to_le_bytes());
                 offset += 4;
 
                 let path_size = entry.path.len() as u32;
                 let encoded_path_size = self.xor_u32_vxace(path_size);
-                memcpy(
-                    &mut archive_buffer[offset..],
-                    &encoded_path_size.to_le_bytes(),
-                );
+                memcpy(&mut archive_buffer[offset..], &encoded_path_size.to_le_bytes());
                 offset += 4;
 
                 memcpy(&mut archive_buffer[offset..], entry.path);
@@ -420,10 +379,7 @@ impl<'a> Decrypter<'a> {
                 let path_size = entry.path.len() as u32;
 
                 let encoded_path_size = self.xor_u32_older(path_size);
-                memcpy(
-                    &mut archive_buffer[offset..],
-                    &encoded_path_size.to_le_bytes(),
-                );
+                memcpy(&mut archive_buffer[offset..], &encoded_path_size.to_le_bytes());
 
                 memcpy(&mut archive_buffer[offset..], entry.path);
                 offset += entry.path.len();
@@ -432,10 +388,7 @@ impl<'a> Decrypter<'a> {
 
                 let data_size = entry.data.len() as u32;
                 let encoded_data_size = self.xor_u32_older(data_size);
-                memcpy(
-                    &mut archive_buffer[offset..],
-                    &encoded_data_size.to_le_bytes(),
-                );
+                memcpy(&mut archive_buffer[offset..], &encoded_data_size.to_le_bytes());
                 offset += 4;
 
                 memcpy(&mut archive_buffer[offset..], entry.data);
@@ -511,10 +464,7 @@ impl<'a> Decrypter<'a> {
     /// # Example
     /// See [`Decrypter::encrypt`].
     ///
-    pub fn encrypted_buffer_size(
-        archive_entries: &[ArchiveEntry],
-        engine: Engine,
-    ) -> usize {
+    pub fn encrypted_buffer_size(archive_entries: &[ArchiveEntry], engine: Engine) -> usize {
         let mut buf_size: usize = ARCHIVE_HEADER.len();
 
         // Engine byte
@@ -589,12 +539,7 @@ impl<'a> Decrypter<'a> {
     /// ```
     #[must_use]
     #[inline]
-    pub fn encrypt(
-        &mut self,
-        archive_entries: &[ArchiveEntry],
-        engine: Engine,
-        archive_buffer: &mut [u8],
-    ) {
+    pub fn encrypt(&mut self, archive_entries: &[ArchiveEntry], engine: Engine, archive_buffer: &mut [u8]) {
         memcpy(archive_buffer, ARCHIVE_HEADER);
         archive_buffer[7] = engine as u8;
 

@@ -10,15 +10,18 @@ repository = "https://github.com/savannstm/rpgm-archive-decrypter-lib"
 documentation = "https://docs.rs/rpgmad-lib"
 license-file = "LICENSE.md"
 
-[dependencies]
-serde = { version = "1.0.228", features = ["derive"], optional = true }
-strum_macros = "0.28.0"
-thiserror = { version = "2.0.18", default-features = false, features = [] }
-
-[dev-dependencies]
-marshal-rs = "2.0.0"
+[workspace]
+members = ["wasm"]
 
 [features]
 default = ["std"]
 std = ["thiserror/std"]
 serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"], optional = true }
+strum_macros = "0.28.0"
+thiserror = { version = "2.0.20", default-features = false, features = [] }
+
+[dev-dependencies]
+marshal-rs = "2.0.2"
