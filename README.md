@@ -8,6 +8,11 @@ And since it's implemented in Rust 🦀🦀🦀, it's also very tiny, clean, and
 
 Used in my [rpgm-archive-decrypter](https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter) CLI tool and [RPGMTranslate](https://github.com/RPG-Maker-Translation-Tools/rpgmtranslate-qt).
 
+This crate has two ports:
+
+- [TypeScript](./ts) - a rewrite in TypeScript.
+- [WASM](./wasm) - WASM bindings generated from Rust code.
+
 ## Example
 
 ### Decrypt
