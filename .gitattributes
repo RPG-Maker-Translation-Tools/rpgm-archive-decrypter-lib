@@ -1,0 +1,2 @@
+crates/rpgmard-capi/**/*.c linguist-vendored
+crates/rpgmard-capi/**/*.h linguist-vendored
