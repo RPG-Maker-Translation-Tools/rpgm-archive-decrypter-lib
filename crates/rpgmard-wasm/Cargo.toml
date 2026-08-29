@@ -1,6 +1,6 @@
 [package]
 name = "rpgmard-wasm"
-version = "0.1.0"
+version = "5.0.1"
 authors = ["savannstm <savannstm@gmail.com>"]
 edition = "2021"
 rust-version = "1.71.0"
