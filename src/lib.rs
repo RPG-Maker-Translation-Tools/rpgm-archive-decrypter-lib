@@ -1,5 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-#![warn(clippy::all, clippy::pedantic)]
+#![warn(clippy::all, clippy::pedantic, clippy::nursery)]
 #![allow(clippy::needless_doctest_main)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
@@ -50,7 +50,7 @@ pub enum ExtractError {
     InvalidEngine(u8),
 }
 
-#[derive(Clone, Copy, Debug, Display, EnumIs, PartialEq)]
+#[derive(Clone, Copy, Debug, Display, EnumIs, PartialEq, Eq)]
 pub enum Engine {
     #[strum(to_string = "XP/VX")]
     Older = 1,
@@ -143,7 +143,7 @@ impl<'a> Decrypter<'a> {
 
     #[inline]
     /// Decrypts u32 if `u32` is encrypted, encrypts u32 if `u32` is decrypted.
-    fn xor_u32_vxace(&self, u32: u32) -> u32 {
+    const fn xor_u32_vxace(&self, u32: u32) -> u32 {
         u32 ^ self.key
     }
 
@@ -161,7 +161,7 @@ impl<'a> Decrypter<'a> {
 
     #[inline]
     /// Decrypts path if `path_data` is encrypted, encrypts path if `path_data` is decrypted.
-    fn xor_path_vxace(&mut self, path_data: &mut [u8]) {
+    fn xor_path_vxace(&self, path_data: &mut [u8]) {
         for (idx, byte) in (unsafe { &*(path_data as *mut [u8]) }).iter().enumerate() {
             // Compiler is smart and can optimize this modulo into `& 0b11`.
             // Since modulo is more self-descriptive, let it be here.
@@ -221,99 +221,105 @@ impl<'a> Decrypter<'a> {
     }
 
     #[inline]
-    #[track_caller]
-    fn decrypt_entries(&'a mut self) -> impl Iterator<Item = ArchiveEntry<'a>> {
+    fn init_entries(&mut self) {
         if self.engine.is_vx_ace() {
             // Default key is not ever used and overwritten.
             let key = self.read_u32();
             self.update_key(key);
             self.update_key_vxace();
         }
+    }
 
-        iter::from_fn(move || {
-            let mut u32: u32;
+    /// Returns the next decrypted [`ArchiveEntry`], or [`None`] once the archive is exhausted.
+    ///
+    /// This is the pull-based equivalent of the iterator returned by [`Decrypter::decrypt`] - call it
+    /// repeatedly after [`Decrypter::start`] (or [`Decrypter::decrypt`], which calls [`Decrypter::start`]
+    /// internally) until it returns [`None`]. Useful when you don't want to hold an [`Iterator`], e.g. across
+    /// an FFI boundary.
+    #[track_caller]
+    pub fn next_entry(&mut self) -> Option<ArchiveEntry<'a>> {
+        let mut u32: u32;
 
-            if self.engine.is_vx_ace() {
-                u32 = self.read_u32();
-                let data_offset = self.xor_u32_vxace(u32) as u64;
+        if self.engine.is_vx_ace() {
+            u32 = self.read_u32();
+            let data_offset = u64::from(self.xor_u32_vxace(u32));
 
-                // End of data
-                if data_offset == 0 {
-                    return None;
-                }
-
-                u32 = self.read_u32();
-                let data_size = self.xor_u32_vxace(u32) as usize;
-
-                u32 = self.read_u32();
-                let entry_key = self.xor_u32_vxace(u32);
-
-                u32 = self.read_u32();
-                let path_size = self.xor_u32_vxace(u32) as usize;
-
-                let path_data = unsafe { &mut *(self.read_bytes(path_size) as *const [u8] as *mut [u8]) };
-
-                self.xor_path_vxace(path_data);
-
-                // Store current position
-                let prev_pos = self.pos;
-
-                // Read data
-                self.seek_byte(SeekFrom::Start(data_offset));
-
-                let entry_data = unsafe { &mut *(self.read_bytes(data_size) as *const [u8] as *mut [u8]) };
-                Self::xor_data(entry_key, entry_data);
-
-                let entry = ArchiveEntry {
-                    path: path_data,
-                    data: entry_data,
-                };
-
-                // Restore position
-                self.seek_byte(SeekFrom::Start(prev_pos as u64));
-
-                Some(entry)
-            } else {
-                // End of data
-                if self.pos == self.len {
-                    return None;
-                }
-
-                u32 = self.read_u32();
-                let path_size = self.xor_u32_older(u32) as usize;
-
-                let path_data = unsafe { &mut *(self.read_bytes(path_size) as *const [u8] as *mut [u8]) };
-
-                self.xor_path_older(path_data);
-
-                u32 = self.read_u32();
-                let data_size = self.xor_u32_older(u32) as usize;
-                let data_offset = self.pos as u64;
-                let entry_key = self.key;
-
-                // Skip data block
-                self.seek_byte(SeekFrom::Current(data_size as i64));
-
-                // Store current position
-                let prev_pos = self.pos;
-
-                // Seek back to the data and read it
-                self.seek_byte(SeekFrom::Start(data_offset));
-
-                let entry_data = unsafe { &mut *(self.read_bytes(data_size) as *const [u8] as *mut [u8]) };
-                Self::xor_data(entry_key, entry_data);
-
-                let entry = ArchiveEntry {
-                    path: path_data,
-                    data: entry_data,
-                };
-
-                // Restore position
-                self.seek_byte(SeekFrom::Start(prev_pos as u64));
-
-                Some(entry)
+            // End of data
+            if data_offset == 0 {
+                return None;
             }
-        })
+
+            u32 = self.read_u32();
+            let data_size = self.xor_u32_vxace(u32) as usize;
+
+            u32 = self.read_u32();
+            let entry_key = self.xor_u32_vxace(u32);
+
+            u32 = self.read_u32();
+            let path_size = self.xor_u32_vxace(u32) as usize;
+
+            let path_data = unsafe { &mut *(self.read_bytes(path_size) as *const [u8]).cast_mut() };
+
+            self.xor_path_vxace(path_data);
+
+            // Store current position
+            let prev_pos = self.pos;
+
+            // Read data
+            self.seek_byte(SeekFrom::Start(data_offset));
+
+            let entry_data = unsafe { &mut *(self.read_bytes(data_size) as *const [u8]).cast_mut() };
+            Self::xor_data(entry_key, entry_data);
+
+            let entry = ArchiveEntry {
+                path: path_data,
+                data: entry_data,
+            };
+
+            // Restore position
+            self.seek_byte(SeekFrom::Start(prev_pos as u64));
+
+            Some(entry)
+        } else {
+            // End of data
+            if self.pos == self.len {
+                return None;
+            }
+
+            u32 = self.read_u32();
+            let path_size = self.xor_u32_older(u32) as usize;
+
+            let path_data = unsafe { &mut *(self.read_bytes(path_size) as *const [u8]).cast_mut() };
+
+            self.xor_path_older(path_data);
+
+            u32 = self.read_u32();
+            let data_size = self.xor_u32_older(u32) as usize;
+            let data_offset = self.pos as u64;
+            let entry_key = self.key;
+
+            // Skip data block
+            self.seek_byte(SeekFrom::Current(data_size as i64));
+
+            // Store current position
+            let prev_pos = self.pos;
+
+            // Seek back to the data and read it
+            self.seek_byte(SeekFrom::Start(data_offset));
+
+            let entry_data = unsafe { &mut *(self.read_bytes(data_size) as *const [u8]).cast_mut() };
+            Self::xor_data(entry_key, entry_data);
+
+            let entry = ArchiveEntry {
+                path: path_data,
+                data: entry_data,
+            };
+
+            // Restore position
+            self.seek_byte(SeekFrom::Start(prev_pos as u64));
+
+            Some(entry)
+        }
     }
 
     fn encrypt_entries(&mut self, entries: &[ArchiveEntry], archive_buffer: &mut [u8]) {
@@ -447,9 +453,45 @@ impl<'a> Decrypter<'a> {
         &'a mut self,
         archive_data: &'a mut [u8],
     ) -> Result<impl Iterator<Item = ArchiveEntry<'a>>, ExtractError> {
+        self.start(archive_data)?;
+        Ok(iter::from_fn(move || self.next_entry()))
+    }
+
+    /// Resets decryption state from `archive_data` and parses the archive header, without producing any
+    /// entries yet.
+    ///
+    /// This is the pull-based equivalent of [`Decrypter::decrypt`] - call [`Decrypter::next_entry`]
+    /// repeatedly afterwards to pull entries one at a time, instead of holding an [`Iterator`]. Useful across
+    /// an FFI boundary, where a borrowing iterator can't be returned.
+    ///
+    /// # Parameters
+    /// - `archive_data`: The content of the archive file. This data is modified in-place, and requires to be a mutable reference.
+    ///
+    /// # Errors
+    ///
+    /// - [`ExtractError::InvalidHeader`] for invalid header.
+    /// - [`ExtractError::InvalidEngine`] for invalid header engine type byte.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use rpgmad_lib::Decrypter;
+    /// use std::fs::read;
+    ///
+    /// let mut data = read("C:/Game/Game.rgss3a").unwrap();
+    /// let mut decrypter = Decrypter::new();
+    /// decrypter.start(&mut data).unwrap();
+    ///
+    /// while let Some(entry) = decrypter.next_entry() {
+    ///     let path = String::from_utf8_lossy(entry.path);
+    ///     println!("{path}");
+    /// }
+    /// ```
+    #[inline]
+    pub fn start(&mut self, archive_data: &'a mut [u8]) -> Result<(), ExtractError> {
         self.reset(archive_data);
         self.parse_header()?;
-        Ok(self.decrypt_entries())
+        self.init_entries();
+        Ok(())
     }
 
     /// Returns the size for the encrypted buffer of archive entries in bytes.
@@ -464,6 +506,7 @@ impl<'a> Decrypter<'a> {
     /// # Example
     /// See [`Decrypter::encrypt`].
     ///
+    #[must_use]
     pub fn encrypted_buffer_size(archive_entries: &[ArchiveEntry], engine: Engine) -> usize {
         let mut buf_size: usize = ARCHIVE_HEADER.len();
 
@@ -537,7 +580,6 @@ impl<'a> Decrypter<'a> {
     /// Decrypter::new().encrypt(&archive_entries, Engine::VXAce, &mut archive_buffer);
     /// write("./Game.rgss3a", archive_buffer).unwrap();
     /// ```
-    #[must_use]
     #[inline]
     pub fn encrypt(&mut self, archive_entries: &[ArchiveEntry], engine: Engine, archive_buffer: &mut [u8]) {
         memcpy(archive_buffer, ARCHIVE_HEADER);

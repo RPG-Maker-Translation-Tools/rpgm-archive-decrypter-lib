@@ -2,16 +2,17 @@
 
 **BLAZINGLY** :fire: fast and tiny library for decrypting RPG Maker XP/VX/VXAce `.rgssad`/`.rgss2a`/`.rgss3a` archives.
 
-This project essentially is a rewrite of uuksu's [RPGMakerDecrypter](https://github.com/uuksu/RPGMakerDecrypter) in Rust as a library, but it also implements archive encryption, **and** can be run in no_std environments.
+This project essentially is a rewrite of uuksu's [RPGMakerDecrypter](https://github.com/uuksu/RPGMakerDecrypter) in Rust as a library, but it also implements archive encryption, **and** can be run in `no_std` environments.
 
 And since it's implemented in Rust 🦀🦀🦀, it's also very tiny, clean, and performant.
 
 Used in my [rpgm-archive-decrypter](https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter) CLI tool and [RPGMTranslate](https://github.com/RPG-Maker-Translation-Tools/rpgmtranslate-qt).
 
-This crate has two ports:
+This crate has two ports, plus a C API:
 
 - [TypeScript](./ts) - a rewrite in TypeScript.
-- [WASM](./wasm) - WASM bindings generated from Rust code.
+- [WASM](./crates/rpgmard-wasm) - WASM bindings generated from Rust code.
+- [C API](./crates/rpgmard-capi) - C bindings, installable via `cargo-c`.
 
 ## Example
 

@@ -1,6 +1,6 @@
 [package]
 name = "rpgmad-lib"
-version = "5.0.0"
+version = "5.0.1"
 authors = ["savannstm <savannstm@gmail.com>"]
 edition = "2021"
 rust-version = "1.71.0"
@@ -11,7 +11,7 @@ documentation = "https://docs.rs/rpgmad-lib"
 license-file = "LICENSE.md"
 
 [workspace]
-members = ["wasm"]
+members = ["crates/rpgmard-wasm", "crates/rpgmard-capi"]
 
 [features]
 default = ["std"]
@@ -24,4 +24,4 @@ strum_macros = "0.28.0"
 thiserror = { version = "2.0.20", default-features = false, features = [] }
 
 [dev-dependencies]
-marshal-rs = "2.0.2"
+marshal-rs = "3.0.0"
