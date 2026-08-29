@@ -1,9 +1,9 @@
 [package]
 name = "rpgmard-wasm"
-version = "5.0.1"
-authors = ["savannstm <savannstm@gmail.com>"]
-edition = "2021"
-rust-version = "1.71.0"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "WASM bindings for rpgmad-lib."
 repository = "https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter-lib"
 documentation = "https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter-lib/tree/master/crates/rpgmard-wasm"
@@ -13,6 +13,7 @@ publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+doctest = false
 
 [dependencies]
 rpgmad-lib = { path = "../.." }
