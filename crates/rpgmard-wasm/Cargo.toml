@@ -4,10 +4,11 @@ version.workspace = true
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "WASM bindings for rpgmad-lib."
-repository = "https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter-lib"
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter-lib/tree/master/crates/rpgmard-wasm"
-license-file = "LICENSE.md"
 keywords = ["rpgmaker", "rgss", "wasm", "decrypt", "encrypt"]
 publish = false
 
@@ -17,4 +18,4 @@ doctest = false
 
 [dependencies]
 rpgmad-lib = { path = "../.." }
-wasm-bindgen = "=0.2.127"
+wasm-bindgen = "=0.2.129"

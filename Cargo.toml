@@ -1,23 +1,31 @@
 [package]
 name = "rpgmad-lib"
-version = "5.0.1"
+version = "5.0.2"
 authors = ["savannstm <savannstm@gmail.com>"]
 edition = "2021"
-rust-version = "1.71.0"
+rust-version = "1.77.0"
 description = "Library for decrypting/encrypting RPG Maker `rgss` archives."
 readme = "README.md"
-repository = "https://github.com/savannstm/rpgm-archive-decrypter-lib"
+repository = "https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter-lib"
+homepage = "https://crates.io/crates/rpgmad-lib"
 documentation = "https://docs.rs/rpgmad-lib"
-license-file = "LICENSE.md"
+license = "WTFPL"
+keywords = ["rpgmaker", "rgss", "archive", "decrypt", "encrypt"]
+categories = ["encoding", "game-development"]
+exclude = ["/.gitignore", "/.gitattributes", "/rustfmt.toml", "/ts", "/tests"]
 
 [workspace]
-members = ["crates/rpgmard-wasm", "crates/rpgmard-capi"]
+members = ["crates/rpgmard-capi", "crates/rpgmard-wasm"]
 
 [workspace.package]
-version = "5.0.1"
+version = "5.0.2"
 edition = "2021"
-rust-version = "1.71.0"
+rust-version = "1.77.0"
 authors = ["savannstm <savannstm@gmail.com>"]
+description = "Library for decrypting/encrypting RPG Maker `rgss` archives."
+license = "WTFPL"
+repository = "https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter-lib"
+homepage = "https://crates.io/crates/rpgmad-lib"
 
 [features]
 default = ["std"]
@@ -27,7 +35,7 @@ serde = ["dep:serde"]
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"], optional = true }
 strum_macros = "0.28.0"
-thiserror = { version = "2.0.20", default-features = false, features = [] }
+thiserror = { version = "2.0.21", default-features = false, features = [] }
 
 [dev-dependencies]
-marshal-rs = "3.0.0"
+marshal-rs = "3.3.0"

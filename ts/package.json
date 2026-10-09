@@ -1,6 +1,6 @@
 {
     "name": "rpgmard-lib",
-    "version": "5.0.0",
+    "version": "5.0.2",
     "description": "Library for decrypting/encrypting RPG Maker `rgss` archives.",
     "keywords": [
         "rpg-maker",

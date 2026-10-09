@@ -50,7 +50,7 @@ pub enum ExtractError {
     InvalidEngine(u8),
 }
 
-#[derive(Clone, Copy, Debug, Display, EnumIs, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Display, EnumIs, Eq, PartialEq)]
 pub enum Engine {
     #[strum(to_string = "XP/VX")]
     Older = 1,
