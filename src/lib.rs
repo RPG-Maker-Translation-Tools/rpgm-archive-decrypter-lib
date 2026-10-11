@@ -1,11 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::all, clippy::pedantic, clippy::nursery)]
-#![allow(clippy::needless_doctest_main)]
 #![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::cast_sign_loss)]
-#![allow(clippy::deref_addrof)]
-#![allow(invalid_reference_casting)]
 #![doc = include_str!("../README.md")]
 
 use core::{
@@ -21,11 +16,6 @@ fn memcpy(dst: &mut [u8], src: &[u8]) {
     unsafe {
         core::ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), src.len());
     }
-}
-
-enum SeekFrom {
-    Start(u64),
-    Current(i64),
 }
 
 macro_rules! sizeof {
@@ -48,6 +38,19 @@ pub enum ExtractError {
     InvalidHeader([u8; 7]),
     #[error("Invalid game engine byte: {0}. Expected `1` for XP/VX or `3` for VX Ace.")]
     InvalidEngine(u8),
+    #[error("Archive ends unexpectedly.")]
+    Truncated,
+    #[error("Archive entries overlap or precede the entry table.")]
+    Corrupt,
+}
+
+#[derive(Debug, Error)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub enum EncryptError {
+    #[error("Archive would exceed 4 GiB, which the format can't represent.")]
+    TooLarge,
+    #[error("Archive buffer is smaller than the size `encrypted_buffer_size` returns.")]
+    BufferTooSmall,
 }
 
 #[derive(Clone, Copy, Debug, Display, EnumIs, Eq, PartialEq)]
@@ -78,9 +81,106 @@ pub struct Decrypter<'a> {
     key_bytes: [u8; sizeof!(u32)],
 
     // Decryption members
-    data: &'a mut [u8],
-    pos: usize,
-    len: usize,
+    /// Entry table not yet consumed. For the older engines it's the whole entry stream (path, size, contents, ...).
+    table: &'a mut [u8],
+    /// VX Ace only: file contents not yet consumed, starting at archive offset `payload_offset`.
+    payload: &'a mut [u8],
+    payload_offset: usize,
+}
+
+/// Splits the first `count` bytes off `buf`, or returns [`None`] (leaving `buf` untouched) if it's shorter.
+fn take<'a>(buf: &mut &'a mut [u8], count: usize) -> Option<&'a mut [u8]> {
+    if count > buf.len() {
+        return None;
+    }
+
+    let (head, tail) = core::mem::take(buf).split_at_mut(count);
+    *buf = tail;
+    Some(head)
+}
+
+fn take_u32(buf: &mut &mut [u8]) -> Option<u32> {
+    let bytes = take(buf, sizeof!(u32))?;
+    Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+fn read_u32(data: &[u8], pos: usize) -> Result<u32, ExtractError> {
+    data.get(pos..)
+        .and_then(<[u8]>::first_chunk::<{ sizeof!(u32) }>)
+        .map(|bytes| u32::from_le_bytes(*bytes))
+        .ok_or(ExtractError::Truncated)
+}
+
+/// Returns `pos + count`, failing if that's past the end of `data`.
+fn skip(data: &[u8], pos: usize, count: usize) -> Result<usize, ExtractError> {
+    pos.checked_add(count)
+        .filter(|&end| end <= data.len())
+        .ok_or(ExtractError::Truncated)
+}
+
+const fn step_older(key: u32) -> u32 {
+    key.wrapping_mul(7).wrapping_add(3)
+}
+
+/// Walks the XP/VX entry stream without decrypting it, so that [`Decrypter::next_entry`] can't run out of bounds.
+fn validate_older(data: &[u8]) -> Result<(), ExtractError> {
+    let mut key = OLDER_DECRYPTION_KEY;
+    let mut pos = ARCHIVE_HEADER.len() + 1;
+
+    while pos != data.len() {
+        let path_size = (read_u32(data, pos)? ^ key) as usize;
+        key = step_older(key);
+        pos = skip(data, pos + sizeof!(u32), path_size)?;
+
+        // Each path byte advances the key.
+        for _ in 0..path_size {
+            key = step_older(key);
+        }
+
+        let data_size = (read_u32(data, pos)? ^ key) as usize;
+        key = step_older(key);
+        pos = skip(data, pos + sizeof!(u32), data_size)?;
+    }
+
+    Ok(())
+}
+
+/// Walks the VX Ace entry table without decrypting it, so that [`Decrypter::next_entry`] can't run out of
+/// bounds. Returns the table's end offset.
+///
+/// Entry contents must follow the table in entry order without overlapping, as every archive written by
+/// RPG Maker (and [`Decrypter::encrypt`]) lays them out. This is what lets `next_entry` hand out each region
+/// as a separate `&mut` borrow.
+fn validate_vxace(data: &[u8], key: u32) -> Result<usize, ExtractError> {
+    const TABLE_START: usize = 12;
+    const ENTRY_HEADER_SIZE: usize = 16;
+
+    let mut pos = TABLE_START;
+    while read_u32(data, pos)? ^ key != 0 {
+        let path_size = (read_u32(data, pos + 12)? ^ key) as usize;
+        pos = skip(data, pos + ENTRY_HEADER_SIZE, path_size)?;
+    }
+
+    // The zero offset terminating the table is part of the archive.
+    let table_end = pos;
+    let mut min_offset = skip(data, table_end, sizeof!(u32))?;
+
+    pos = TABLE_START;
+    while pos < table_end {
+        // In bounds: the first pass read these fields.
+        let offset = (read_u32(data, pos)? ^ key) as usize;
+        let data_size = (read_u32(data, pos + 4)? ^ key) as usize;
+        let path_size = (read_u32(data, pos + 12)? ^ key) as usize;
+
+        if offset < min_offset {
+            return Err(ExtractError::Corrupt);
+        }
+
+        min_offset = skip(data, offset, data_size)?;
+        pos += ENTRY_HEADER_SIZE + path_size;
+    }
+
+    Ok(table_end)
 }
 
 impl<'a> Decrypter<'a> {
@@ -92,9 +192,9 @@ impl<'a> Decrypter<'a> {
             key: OLDER_DECRYPTION_KEY,
             key_bytes: OLDER_DECRYPTION_KEY.to_le_bytes(),
 
-            data: &mut [],
-            pos: 0,
-            len: 0,
+            table: &mut [],
+            payload: &mut [],
+            payload_offset: 0,
         }
     }
 
@@ -106,39 +206,12 @@ impl<'a> Decrypter<'a> {
 
     #[inline]
     fn update_key_older(&mut self) {
-        self.update_key(self.key.wrapping_mul(7).wrapping_add(3));
+        self.update_key(step_older(self.key));
     }
 
     #[inline]
     fn update_key_vxace(&mut self) {
         self.update_key(self.key.wrapping_mul(9).wrapping_add(3));
-    }
-
-    #[inline]
-    #[track_caller]
-    fn read_bytes(&mut self, count: usize) -> &[u8] {
-        self.pos += count;
-        &self.data[self.pos - count..self.pos]
-    }
-
-    #[inline]
-    fn read_u32(&mut self) -> u32 {
-        let chunk = self.read_bytes(sizeof!(u32));
-        u32::from_le_bytes(unsafe { *chunk.as_ptr().cast::<[u8; sizeof!(u32)]>() })
-    }
-
-    #[inline]
-    fn read_byte(&mut self) -> u8 {
-        self.pos += 1;
-        self.data[self.pos - 1]
-    }
-
-    #[inline]
-    fn seek_byte(&mut self, from: SeekFrom) {
-        self.pos = match from {
-            SeekFrom::Start(offset) => offset as usize,
-            SeekFrom::Current(offset) => self.pos + offset as usize,
-        };
     }
 
     #[inline]
@@ -162,18 +235,18 @@ impl<'a> Decrypter<'a> {
     #[inline]
     /// Decrypts path if `path_data` is encrypted, encrypts path if `path_data` is decrypted.
     fn xor_path_vxace(&self, path_data: &mut [u8]) {
-        for (idx, byte) in (unsafe { &*(path_data as *mut [u8]) }).iter().enumerate() {
+        for (idx, byte) in path_data.iter_mut().enumerate() {
             // Compiler is smart and can optimize this modulo into `& 0b11`.
             // Since modulo is more self-descriptive, let it be here.
-            path_data[idx] = byte ^ self.key_bytes[idx % 4];
+            *byte ^= self.key_bytes[idx % 4];
         }
     }
 
     #[inline]
     /// Decrypts path if `path_data` is encrypted, encrypts path if `path_data` is decrypted.
     fn xor_path_older(&mut self, path_data: &mut [u8]) {
-        for (idx, byte) in (unsafe { &*(path_data as *mut [u8]) }).iter().enumerate() {
-            path_data[idx] = byte ^ self.key as u8;
+        for byte in path_data {
+            *byte ^= self.key as u8;
             self.update_key_older();
         }
     }
@@ -185,29 +258,28 @@ impl<'a> Decrypter<'a> {
         let mut key_byte_pos = 0;
 
         // Decrypting data
-        for (idx, data_byte) in (unsafe { &*(data as *mut [u8]) }).iter().enumerate() {
+        for data_byte in data {
             if key_byte_pos == 4 {
                 key_byte_pos = 0;
-                key = key.wrapping_mul(7).wrapping_add(3);
+                key = step_older(key);
                 key_bytes = key.to_le_bytes();
             }
 
-            data[idx] = data_byte ^ key_bytes[key_byte_pos];
+            *data_byte ^= key_bytes[key_byte_pos];
             key_byte_pos += 1;
         }
     }
 
-    #[inline]
-    fn parse_header(&mut self) -> Result<(), ExtractError> {
-        let header = self.read_bytes(ARCHIVE_HEADER.len());
+    /// Validates `data` and points the decryption state into it. Leaves the state dirty on error, see [`Self::start`].
+    fn begin(&mut self, data: &'a mut [u8]) -> Result<(), ExtractError> {
+        let Some(&[h0, h1, h2, h3, h4, h5, h6, engine_type]) = data.first_chunk::<8>() else {
+            return Err(ExtractError::Truncated);
+        };
 
-        if header != ARCHIVE_HEADER {
-            return Err(ExtractError::InvalidHeader(unsafe {
-                *header.as_ptr().cast::<[u8; 7]>()
-            }));
+        let header = [h0, h1, h2, h3, h4, h5, h6];
+        if header != *ARCHIVE_HEADER {
+            return Err(ExtractError::InvalidHeader(header));
         }
-
-        let engine_type = self.read_byte();
 
         self.engine = match engine_type {
             1 => Engine::Older,
@@ -217,17 +289,28 @@ impl<'a> Decrypter<'a> {
             }
         };
 
-        Ok(())
-    }
-
-    #[inline]
-    fn init_entries(&mut self) {
         if self.engine.is_vx_ace() {
             // Default key is not ever used and overwritten.
-            let key = self.read_u32();
+            let key = read_u32(data, 8)?;
             self.update_key(key);
             self.update_key_vxace();
+
+            let table_end = validate_vxace(data, self.key)?;
+
+            // The table's terminating zero offset sits between the table and the contents.
+            let (head, payload) = data.split_at_mut(table_end + sizeof!(u32));
+            let (_, table_and_terminator) = head.split_at_mut(12);
+            let (table, _) = table_and_terminator.split_at_mut(table_end - 12);
+
+            self.table = table;
+            self.payload = payload;
+            self.payload_offset = table_end + sizeof!(u32);
+        } else {
+            validate_older(data)?;
+            self.table = data.split_at_mut(ARCHIVE_HEADER.len() + 1).1;
         }
+
+        Ok(())
     }
 
     /// Returns the next decrypted [`ArchiveEntry`], or [`None`] once the archive is exhausted.
@@ -236,89 +319,46 @@ impl<'a> Decrypter<'a> {
     /// repeatedly after [`Decrypter::start`] (or [`Decrypter::decrypt`], which calls [`Decrypter::start`]
     /// internally) until it returns [`None`]. Useful when you don't want to hold an [`Iterator`], e.g. across
     /// an FFI boundary.
-    #[track_caller]
     pub fn next_entry(&mut self) -> Option<ArchiveEntry<'a>> {
-        let mut u32: u32;
+        // `start` validated the whole archive, so none of the `?`s below can fail after a successful one.
+        // After a failed one (or none at all) the table is empty.
+        if self.table.is_empty() {
+            return None;
+        }
 
         if self.engine.is_vx_ace() {
-            u32 = self.read_u32();
-            let data_offset = u64::from(self.xor_u32_vxace(u32));
-
-            // End of data
-            if data_offset == 0 {
-                return None;
+            let mut fields = [0u32; 4];
+            for field in &mut fields {
+                let raw = take_u32(&mut self.table)?;
+                *field = self.xor_u32_vxace(raw);
             }
+            let [offset, data_size, entry_key, path_size] = fields;
+            let (offset, data_size, path_size) = (offset as usize, data_size as usize, path_size as usize);
 
-            u32 = self.read_u32();
-            let data_size = self.xor_u32_vxace(u32) as usize;
+            let path = take(&mut self.table, path_size)?;
+            self.xor_path_vxace(path);
 
-            u32 = self.read_u32();
-            let entry_key = self.xor_u32_vxace(u32);
+            take(&mut self.payload, offset.checked_sub(self.payload_offset)?)?;
+            let data = take(&mut self.payload, data_size)?;
+            self.payload_offset = offset + data_size;
+            Self::xor_data(entry_key, data);
 
-            u32 = self.read_u32();
-            let path_size = self.xor_u32_vxace(u32) as usize;
-
-            let path_data = unsafe { &mut *(self.read_bytes(path_size) as *const [u8]).cast_mut() };
-
-            self.xor_path_vxace(path_data);
-
-            // Store current position
-            let prev_pos = self.pos;
-
-            // Read data
-            self.seek_byte(SeekFrom::Start(data_offset));
-
-            let entry_data = unsafe { &mut *(self.read_bytes(data_size) as *const [u8]).cast_mut() };
-            Self::xor_data(entry_key, entry_data);
-
-            let entry = ArchiveEntry {
-                path: path_data,
-                data: entry_data,
-            };
-
-            // Restore position
-            self.seek_byte(SeekFrom::Start(prev_pos as u64));
-
-            Some(entry)
+            Some(ArchiveEntry { path, data })
         } else {
-            // End of data
-            if self.pos == self.len {
-                return None;
-            }
+            let raw = take_u32(&mut self.table)?;
+            let path_size = self.xor_u32_older(raw) as usize;
 
-            u32 = self.read_u32();
-            let path_size = self.xor_u32_older(u32) as usize;
+            let path = take(&mut self.table, path_size)?;
+            self.xor_path_older(path);
 
-            let path_data = unsafe { &mut *(self.read_bytes(path_size) as *const [u8]).cast_mut() };
-
-            self.xor_path_older(path_data);
-
-            u32 = self.read_u32();
-            let data_size = self.xor_u32_older(u32) as usize;
-            let data_offset = self.pos as u64;
+            let raw = take_u32(&mut self.table)?;
+            let data_size = self.xor_u32_older(raw) as usize;
             let entry_key = self.key;
 
-            // Skip data block
-            self.seek_byte(SeekFrom::Current(data_size as i64));
+            let data = take(&mut self.table, data_size)?;
+            Self::xor_data(entry_key, data);
 
-            // Store current position
-            let prev_pos = self.pos;
-
-            // Seek back to the data and read it
-            self.seek_byte(SeekFrom::Start(data_offset));
-
-            let entry_data = unsafe { &mut *(self.read_bytes(data_size) as *const [u8]).cast_mut() };
-            Self::xor_data(entry_key, entry_data);
-
-            let entry = ArchiveEntry {
-                path: path_data,
-                data: entry_data,
-            };
-
-            // Restore position
-            self.seek_byte(SeekFrom::Start(prev_pos as u64));
-
-            Some(entry)
+            Some(ArchiveEntry { path, data })
         }
     }
 
@@ -356,7 +396,7 @@ impl<'a> Decrypter<'a> {
                 offset += 4;
 
                 memcpy(&mut archive_buffer[offset..], entry.path);
-                self.xor_path_vxace(&mut archive_buffer[offset..]);
+                self.xor_path_vxace(&mut archive_buffer[offset..offset + entry.path.len()]);
                 offset += entry.path.len();
             }
 
@@ -377,7 +417,7 @@ impl<'a> Decrypter<'a> {
                 placeholder_offset += 16 + entry.path.len();
 
                 memcpy(&mut archive_buffer[offset..], entry.data);
-                Self::xor_data(self.key, &mut archive_buffer[offset..]);
+                Self::xor_data(self.key, &mut archive_buffer[offset..offset + entry.data.len()]);
                 offset += entry.data.len();
             }
         } else {
@@ -386,11 +426,11 @@ impl<'a> Decrypter<'a> {
 
                 let encoded_path_size = self.xor_u32_older(path_size);
                 memcpy(&mut archive_buffer[offset..], &encoded_path_size.to_le_bytes());
+                offset += 4;
 
                 memcpy(&mut archive_buffer[offset..], entry.path);
+                self.xor_path_older(&mut archive_buffer[offset..offset + entry.path.len()]);
                 offset += entry.path.len();
-
-                self.xor_path_older(&mut archive_buffer[offset..]);
 
                 let data_size = entry.data.len() as u32;
                 let encoded_data_size = self.xor_u32_older(data_size);
@@ -398,16 +438,16 @@ impl<'a> Decrypter<'a> {
                 offset += 4;
 
                 memcpy(&mut archive_buffer[offset..], entry.data);
-                Self::xor_data(self.key, &mut archive_buffer[offset..]);
+                Self::xor_data(self.key, &mut archive_buffer[offset..offset + entry.data.len()]);
                 offset += entry.data.len();
             }
         }
     }
 
-    fn reset(&mut self, data: &'a mut [u8]) {
-        self.len = data.len();
-        self.data = data;
-        self.pos = 0;
+    fn reset(&mut self) {
+        self.table = &mut [];
+        self.payload = &mut [];
+        self.payload_offset = 0;
 
         self.engine = Engine::Older;
         self.key = OLDER_DECRYPTION_KEY;
@@ -488,10 +528,15 @@ impl<'a> Decrypter<'a> {
     /// ```
     #[inline]
     pub fn start(&mut self, archive_data: &'a mut [u8]) -> Result<(), ExtractError> {
-        self.reset(archive_data);
-        self.parse_header()?;
-        self.init_entries();
-        Ok(())
+        self.reset();
+
+        let result = self.begin(archive_data);
+        if result.is_err() {
+            // Nothing is yielded from a rejected archive.
+            self.reset();
+        }
+
+        result
     }
 
     /// Returns the size for the encrypted buffer of archive entries in bytes.
@@ -577,16 +622,38 @@ impl<'a> Decrypter<'a> {
     /// let mut archive_buffer = Vec::new();
     /// archive_buffer.resize(encrypted_buffer_size, 0);
     ///
-    /// Decrypter::new().encrypt(&archive_entries, Engine::VXAce, &mut archive_buffer);
+    /// Decrypter::new().encrypt(&archive_entries, Engine::VXAce, &mut archive_buffer).unwrap();
     /// write("./Game.rgss3a", archive_buffer).unwrap();
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// - [`EncryptError::TooLarge`] if the archive would not fit the format's 32-bit sizes and offsets.
+    /// - [`EncryptError::BufferTooSmall`] if `archive_buffer` is smaller than [`Decrypter::encrypted_buffer_size`].
     #[inline]
-    pub fn encrypt(&mut self, archive_entries: &[ArchiveEntry], engine: Engine, archive_buffer: &mut [u8]) {
+    pub fn encrypt(
+        &mut self,
+        archive_entries: &[ArchiveEntry],
+        engine: Engine,
+        archive_buffer: &mut [u8],
+    ) -> Result<(), EncryptError> {
+        let size = Self::encrypted_buffer_size(archive_entries, engine);
+
+        // Every size and offset written below is at most the total size, so this covers all of the `as u32` casts.
+        if u32::try_from(size).is_err() {
+            return Err(EncryptError::TooLarge);
+        }
+
+        if archive_buffer.len() < size {
+            return Err(EncryptError::BufferTooSmall);
+        }
+
         memcpy(archive_buffer, ARCHIVE_HEADER);
         archive_buffer[7] = engine as u8;
 
         self.engine = engine;
         self.encrypt_entries(archive_entries, archive_buffer);
+        Ok(())
     }
 }
 

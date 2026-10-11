@@ -61,9 +61,73 @@ fn encrypt_vxace() {
     let encrypted_data_size = Decrypter::encrypted_buffer_size(&decrypted_files, Engine::VXAce);
     let mut encrypted = Vec::new();
     encrypted.resize(encrypted_data_size, 0);
-    let _ = Decrypter::new().encrypt(&decrypted_files, Engine::VXAce, &mut encrypted);
+    Decrypter::new().encrypt(&decrypted_files, Engine::VXAce, &mut encrypted).unwrap();
 
     assert!(encrypted.len() == archive_content.len());
+}
+
+const TINY_ENTRIES: [ArchiveEntry; 3] = [
+    ArchiveEntry {
+        path: b"Graphics/a.png",
+        data: b"0123456789",
+    },
+    ArchiveEntry {
+        path: b"Data/b.rvdata2",
+        data: b"",
+    },
+    ArchiveEntry { path: b"c", data: b"xyz" },
+];
+
+fn tiny_archive(engine: Engine) -> Vec<u8> {
+    let mut encrypted = vec![0; Decrypter::encrypted_buffer_size(&TINY_ENTRIES, engine)];
+    Decrypter::new().encrypt(&TINY_ENTRIES, engine, &mut encrypted).unwrap();
+    encrypted
+}
+
+// Found by fuzzing: XP/VX `encrypt` overwrote the path size with the path and left the path unencrypted.
+#[test]
+fn encrypt_decrypt_round_trip() {
+    for engine in [Engine::Older, Engine::VXAce] {
+        let mut encrypted = tiny_archive(engine);
+        let mut decrypter = Decrypter::new();
+        let decrypted = decrypter.decrypt(&mut encrypted).unwrap().collect::<Vec<_>>();
+
+        assert_eq!(decrypted.len(), TINY_ENTRIES.len());
+        for (got, expected) in decrypted.iter().zip(&TINY_ENTRIES) {
+            assert_eq!((got.path, got.data), (expected.path, expected.data));
+        }
+    }
+}
+
+// Found by fuzzing: an empty or cut-off archive used to panic with an out-of-range slice.
+#[test]
+fn malformed_archives_do_not_panic() {
+    assert!(matches!(
+        Decrypter::new().start(&mut []),
+        Err(rpgmad_lib::ExtractError::Truncated)
+    ));
+
+    for engine in [Engine::Older, Engine::VXAce] {
+        let archive = tiny_archive(engine);
+
+        for len in 0..archive.len() {
+            let mut prefix = archive[..len].to_vec();
+            let mut decrypter = Decrypter::new();
+            if decrypter.start(&mut prefix).is_ok() {
+                while decrypter.next_entry().is_some() {}
+            }
+        }
+
+        // Every table field set to the maximum.
+        for pos in 8..archive.len() {
+            let mut corrupted = archive.clone();
+            corrupted[pos..].iter_mut().take(4).for_each(|byte| *byte = 0xFF);
+            let mut decrypter = Decrypter::new();
+            if decrypter.start(&mut corrupted).is_ok() {
+                while decrypter.next_entry().is_some() {}
+            }
+        }
+    }
 }
 
 #[test]
@@ -78,7 +142,19 @@ fn encrypt_older() {
     let encrypted_data_size = Decrypter::encrypted_buffer_size(&decrypted_files, Engine::Older);
     let mut encrypted = Vec::new();
     encrypted.resize(encrypted_data_size, 0);
-    let _ = Decrypter::new().encrypt(&decrypted_files, Engine::Older, &mut encrypted);
+    Decrypter::new().encrypt(&decrypted_files, Engine::Older, &mut encrypted).unwrap();
 
     assert!(archive_content.len() == encrypted.len());
+}
+
+#[test]
+fn encrypt_rejects_small_buffer() {
+    for engine in [Engine::Older, Engine::VXAce] {
+        let mut encrypted = vec![0; Decrypter::encrypted_buffer_size(&TINY_ENTRIES, engine) - 1];
+
+        assert!(matches!(
+            Decrypter::new().encrypt(&TINY_ENTRIES, engine, &mut encrypted),
+            Err(rpgmad_lib::EncryptError::BufferTooSmall)
+        ));
+    }
 }

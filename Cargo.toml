@@ -1,24 +1,24 @@
 [package]
 name = "rpgmad-lib"
-version = "5.0.2"
-authors = ["savannstm <savannstm@gmail.com>"]
-edition = "2021"
-rust-version = "1.77.0"
-description = "Library for decrypting/encrypting RPG Maker `rgss` archives."
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
 readme = "README.md"
-repository = "https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter-lib"
-homepage = "https://crates.io/crates/rpgmad-lib"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/rpgmad-lib"
-license = "WTFPL"
+license.workspace = true
 keywords = ["rpgmaker", "rgss", "archive", "decrypt", "encrypt"]
 categories = ["encoding", "game-development"]
-exclude = ["/.gitignore", "/.gitattributes", "/rustfmt.toml", "/ts", "/tests"]
+exclude = ["/.gitignore", "/.gitattributes", "/rustfmt.toml", "/tests"]
 
 [workspace]
-members = ["crates/rpgmard-capi", "crates/rpgmard-wasm"]
+members = ["capi", "wasm"]
 
 [workspace.package]
-version = "5.0.2"
+version = "6.0.0"
 edition = "2021"
 rust-version = "1.77.0"
 authors = ["savannstm <savannstm@gmail.com>"]
@@ -38,4 +38,4 @@ strum_macros = "0.28.0"
 thiserror = { version = "2.0.21", default-features = false, features = [] }
 
 [dev-dependencies]
-marshal-rs = "3.3.0"
+marshal-rs = "3.4.0"

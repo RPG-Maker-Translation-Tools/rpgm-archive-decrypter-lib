@@ -8,11 +8,10 @@ And since it's implemented in Rust 🦀🦀🦀, it's also very tiny, clean, and
 
 Used in my [rpgm-archive-decrypter](https://github.com/RPG-Maker-Translation-Tools/rpgm-archive-decrypter) CLI tool and [RPGMTranslate](https://github.com/RPG-Maker-Translation-Tools/rpgmtranslate-qt).
 
-This crate has two ports, plus a C API:
+This crate has two ports:
 
-- [TypeScript](./ts) - a rewrite in TypeScript.
-- [WASM](./crates/rpgmard-wasm) - WASM bindings generated from Rust code.
-- [C API](./crates/rpgmard-capi) - C bindings, installable via `cargo-c`.
+- [WASM](./wasm) - WASM bindings generated from Rust code.
+- [C API](./capi) - C bindings, installable via `cargo-c`.
 
 ## Example
 
@@ -57,7 +56,7 @@ let encrypted_buffer_size = Decrypter::encrypted_buffer_size(&archive_entries, E
 let mut archive_buffer = Vec::new();
 archive_buffer.resize(encrypted_buffer_size, 0);
 
-decrypter.encrypt(&archive_entries, Engine::VXAce, &mut archive_buffer);
+decrypter.encrypt(&archive_entries, Engine::VXAce, &mut archive_buffer).unwrap();
 
 write("./Game.rgss3a", archive_buffer).unwrap();
 ```
@@ -73,12 +72,11 @@ write("./Game.rgss3a", archive_buffer).unwrap();
 
 If you could, please consider supporting us through:
 
+- [Boosty](https://boosty.to/mcdeimos) (has lower fees)
 - [Ko-fi](https://ko-fi.com/savannstm)
-- [Patreon](https://www.patreon.com/cw/savannstm)
-- [Boosty](https://boosty.to/mcdeimos)
 
-Even if you don't, it's fine. We'll continue to do as we right now.
+Even if you don't, we will still continue working on the project anyways.
 
 ## License
 
-Project is licensed under WTFPL.
+Project is licensed under [WTFPL](https://www.wtfpl.net/).

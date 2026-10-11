@@ -4,6 +4,7 @@
 //! translate across the JS/WASM boundary (a call only lives for the duration of the call). So instead of mirroring
 //! the borrowing API 1:1, this crate exposes two eager, allocating free functions - `decryptArchive` and
 //! `encryptArchive` - that copy data in and out at the boundary, same as any other WASM binding would.
+#![warn(clippy::all, clippy::pedantic, clippy::nursery)]
 
 use rpgmad_lib::{ArchiveEntry as InnerArchiveEntry, Decrypter, Engine as InnerEngine, ExtractError};
 use wasm_bindgen::prelude::*;

@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-#![allow(clippy::missing_safety_doc)]
+#![warn(clippy::all, clippy::pedantic, clippy::nursery)]
 
-use core::{mem, slice};
+use core::{ffi::c_void, mem, slice};
 use rpgmad_lib::{
     ArchiveEntry as InnerArchiveEntry, Decrypter as InnerDecrypter, Engine as InnerEngine, ExtractError,
 };
@@ -21,18 +21,18 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 /// Target/source RPG Maker engine of an archive.
 #[repr(C)]
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum Engine {
+pub enum RpgmardEngine {
     /// RPG Maker XP / VX (`.rgssad` / `.rgss2a`).
     Older = 1,
     /// RPG Maker VX Ace (`.rgss3a`).
-    VXAce = 3,
+    Vxace = 3,
 }
 
-impl From<Engine> for InnerEngine {
-    fn from(engine: Engine) -> Self {
+impl From<RpgmardEngine> for InnerEngine {
+    fn from(engine: RpgmardEngine) -> Self {
         match engine {
-            Engine::Older => InnerEngine::Older,
-            Engine::VXAce => InnerEngine::VXAce,
+            RpgmardEngine::Older => InnerEngine::Older,
+            RpgmardEngine::Vxace => InnerEngine::VXAce,
         }
     }
 }
@@ -40,7 +40,7 @@ impl From<Engine> for InnerEngine {
 /// Status code returned by every fallible `rpgmard_*` function. `RPGMARD_STATUS_OK` is the only success value.
 #[repr(C)]
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum Status {
+pub enum RpgmardStatus {
     Ok = 0,
     InvalidHeader = 1,
     InvalidEngine = 2,
@@ -52,13 +52,19 @@ pub enum Status {
     /// `out_buffer_len` was smaller than the size returned by `rpgmard_encrypted_buffer_size` for the same
     /// `entries`/`engine`.
     BufferTooSmall = 5,
+    /// The archive ends before its header or entry table does.
+    Truncated = 6,
+    /// The archive's entries overlap each other or the entry table.
+    Corrupt = 7,
 }
 
-impl From<ExtractError> for Status {
+impl From<ExtractError> for RpgmardStatus {
     fn from(error: ExtractError) -> Self {
         match error {
             ExtractError::InvalidHeader(_) => Self::InvalidHeader,
             ExtractError::InvalidEngine(_) => Self::InvalidEngine,
+            ExtractError::Truncated => Self::Truncated,
+            ExtractError::Corrupt => Self::Corrupt,
         }
     }
 }
@@ -66,7 +72,7 @@ impl From<ExtractError> for Status {
 /// A single archive entry, as passed to/from the FFI boundary. `path`/`data` point to `path_len`/`data_len`
 /// bytes respectively.
 #[repr(C)]
-pub struct ArchiveEntry {
+pub struct RpgmardArchiveEntry {
     pub path: *const u8,
     pub path_len: usize,
     pub data: *const u8,
@@ -78,36 +84,44 @@ pub struct ArchiveEntry {
 /// or a buffer sized/aligned per `rpgmard_decrypter_size`/`rpgmard_decrypter_align`) and initialize
 /// it with `rpgmard_decrypter_init`; there is no corresponding free function; once you are done
 /// with the storage, simply reclaim it (e.g. let it go out of scope).
-pub struct Decrypter(InnerDecrypter<'static>);
+pub struct RpgmardDecrypter(InnerDecrypter<'static>);
 
 /// The size, in bytes, of a `Decrypter` instance - the minimum size of the storage passed to
 /// `rpgmard_decrypter_init`.
 #[no_mangle]
 pub extern "C" fn rpgmard_decrypter_size() -> usize {
-    mem::size_of::<Decrypter>()
+    mem::size_of::<RpgmardDecrypter>()
 }
 
 /// The required alignment, in bytes, of the storage passed to `rpgmard_decrypter_init`.
 #[no_mangle]
 pub extern "C" fn rpgmard_decrypter_align() -> usize {
-    mem::align_of::<Decrypter>()
+    mem::align_of::<RpgmardDecrypter>()
 }
 
 /// Initializes a `Decrypter` into caller-provided storage. `out` must point to at least
 /// `rpgmard_decrypter_size()` writable bytes, aligned to `rpgmard_decrypter_align()`.
 ///
 /// Returns `RPGMARD_STATUS_OK` on success, or `RPGMARD_STATUS_NULL_ARGUMENT` if `out` is null.
+///
+/// # Safety
+///
+/// Pointer arguments must be valid for the access their type and any paired length imply; `data` and
+/// `out_buffer` are written through, so they must also be exclusively accessible for the call.
+/// `decrypter` must point to storage of `rpgmard_decrypter_size()` bytes aligned to
+/// `rpgmard_decrypter_align()` that `rpgmard_decrypter_init` has initialised. Null pointers are
+/// rejected with `RPGMARD_STATUS_NULL_ARGUMENT` where the function documents it.
 #[no_mangle]
-pub unsafe extern "C" fn rpgmard_decrypter_init(out: *mut Decrypter) -> Status {
+pub unsafe extern "C" fn rpgmard_decrypter_init(out: *mut RpgmardDecrypter) -> RpgmardStatus {
     if out.is_null() {
-        return Status::NullArgument;
+        return RpgmardStatus::NullArgument;
     }
 
     // SAFETY: caller guarantees `out` points to writable storage of at least `rpgmard_decrypter_size()`
     // bytes, aligned to `rpgmard_decrypter_align()`.
-    unsafe { out.write(Decrypter(InnerDecrypter::new())) };
+    unsafe { out.write(RpgmardDecrypter(InnerDecrypter::new())) };
 
-    Status::Ok
+    RpgmardStatus::Ok
 }
 
 /// Parses `data`'s archive header and resets `decrypter`'s decryption state, without producing any entries
@@ -118,10 +132,18 @@ pub unsafe extern "C" fn rpgmard_decrypter_init(out: *mut Decrypter) -> Status {
 /// storage is reclaimed).
 ///
 /// Returns `RPGMARD_STATUS_OK` on success, or an error status if `data` has an invalid header or engine byte.
+///
+/// # Safety
+///
+/// Pointer arguments must be valid for the access their type and any paired length imply; `data` and
+/// `out_buffer` are written through, so they must also be exclusively accessible for the call.
+/// `decrypter` must point to storage of `rpgmard_decrypter_size()` bytes aligned to
+/// `rpgmard_decrypter_align()` that `rpgmard_decrypter_init` has initialised. Null pointers are
+/// rejected with `RPGMARD_STATUS_NULL_ARGUMENT` where the function documents it.
 #[no_mangle]
-pub unsafe extern "C" fn rpgmard_decrypter_start(decrypter: *mut Decrypter, data: *mut u8, data_len: usize) -> Status {
+pub unsafe extern "C" fn rpgmard_decrypter_start(decrypter: *mut RpgmardDecrypter, data: *mut u8, data_len: usize) -> RpgmardStatus {
     if decrypter.is_null() || data.is_null() {
-        return Status::NullArgument;
+        return RpgmardStatus::NullArgument;
     }
 
     // SAFETY: caller guarantees `data` points to `data_len` readable and writable, initialized bytes, and
@@ -133,7 +155,7 @@ pub unsafe extern "C" fn rpgmard_decrypter_start(decrypter: *mut Decrypter, data
 
     // SAFETY: caller guarantees `decrypter` points to a live `Decrypter` from `rpgmard_decrypter_init`.
     match unsafe { &mut *decrypter }.0.start(data) {
-        Ok(()) => Status::Ok,
+        Ok(()) => RpgmardStatus::Ok,
         Err(error) => error.into(),
     }
 }
@@ -143,8 +165,16 @@ pub unsafe extern "C" fn rpgmard_decrypter_start(decrypter: *mut Decrypter, data
 /// Returns `true` and writes the entry if one was available, `false` (leaving `*out_entry` untouched) once
 /// the archive is exhausted. `out_entry`'s `path`/`data` point into the buffer passed to the preceding
 /// `rpgmard_decrypter_start` call, and are valid for as long as that buffer is.
+///
+/// # Safety
+///
+/// Pointer arguments must be valid for the access their type and any paired length imply; `data` and
+/// `out_buffer` are written through, so they must also be exclusively accessible for the call.
+/// `decrypter` must point to storage of `rpgmard_decrypter_size()` bytes aligned to
+/// `rpgmard_decrypter_align()` that `rpgmard_decrypter_init` has initialised. Null pointers are
+/// rejected with `RPGMARD_STATUS_NULL_ARGUMENT` where the function documents it.
 #[no_mangle]
-pub unsafe extern "C" fn rpgmard_decrypter_next_entry(decrypter: *mut Decrypter, out_entry: *mut ArchiveEntry) -> bool {
+pub unsafe extern "C" fn rpgmard_decrypter_next_entry(decrypter: *mut RpgmardDecrypter, out_entry: *mut RpgmardArchiveEntry) -> bool {
     if decrypter.is_null() || out_entry.is_null() {
         return false;
     }
@@ -157,7 +187,7 @@ pub unsafe extern "C" fn rpgmard_decrypter_next_entry(decrypter: *mut Decrypter,
 
     // SAFETY: caller guarantees `out_entry` points to a writable `ArchiveEntry`.
     unsafe {
-        out_entry.write(ArchiveEntry {
+        out_entry.write(RpgmardArchiveEntry {
             path: entry.path.as_ptr(),
             path_len: entry.path.len(),
             data: entry.data.as_ptr(),
@@ -191,9 +221,9 @@ pub extern "C" fn rpgmard_archive_entry_align() -> usize {
 /// `path`/`data` pointers must be valid for their respective `path_len`/`data_len` for lifetime `'a`.
 /// `scratch` must point to `scratch_len` writable bytes, valid for lifetime `'a`.
 unsafe fn build_entries<'a>(
-    entries: *const ArchiveEntry,
+    entries: *const RpgmardArchiveEntry,
     entries_len: usize,
-    scratch: *mut u8,
+    scratch: *mut c_void,
     scratch_len: usize,
 ) -> Option<&'a [InnerArchiveEntry<'a>]> {
     let required_len = entries_len * mem::size_of::<InnerArchiveEntry>();
@@ -233,12 +263,20 @@ unsafe fn build_entries<'a>(
 /// `rpgmard_archive_entry_align()`; it's used only for the duration of this call.
 ///
 /// Returns 0 if `entries` is null or `scratch` is too small/misaligned.
+///
+/// # Safety
+///
+/// Pointer arguments must be valid for the access their type and any paired length imply; `data` and
+/// `out_buffer` are written through, so they must also be exclusively accessible for the call.
+/// `decrypter` must point to storage of `rpgmard_decrypter_size()` bytes aligned to
+/// `rpgmard_decrypter_align()` that `rpgmard_decrypter_init` has initialised. Null pointers are
+/// rejected with `RPGMARD_STATUS_NULL_ARGUMENT` where the function documents it.
 #[no_mangle]
 pub unsafe extern "C" fn rpgmard_encrypted_buffer_size(
-    entries: *const ArchiveEntry,
+    entries: *const RpgmardArchiveEntry,
     entries_len: usize,
-    engine: Engine,
-    scratch: *mut u8,
+    engine: RpgmardEngine,
+    scratch: *mut c_void,
     scratch_len: usize,
 ) -> usize {
     if entries.is_null() {
@@ -261,29 +299,37 @@ pub unsafe extern "C" fn rpgmard_encrypted_buffer_size(
 ///
 /// `out_buffer_len` must be at least the size returned by `rpgmard_encrypted_buffer_size` for the same
 /// `entries`/`engine`, or the call fails with `RPGMARD_STATUS_BUFFER_TOO_SMALL`.
+///
+/// # Safety
+///
+/// Pointer arguments must be valid for the access their type and any paired length imply; `data` and
+/// `out_buffer` are written through, so they must also be exclusively accessible for the call.
+/// `decrypter` must point to storage of `rpgmard_decrypter_size()` bytes aligned to
+/// `rpgmard_decrypter_align()` that `rpgmard_decrypter_init` has initialised. Null pointers are
+/// rejected with `RPGMARD_STATUS_NULL_ARGUMENT` where the function documents it.
 #[no_mangle]
 pub unsafe extern "C" fn rpgmard_encrypt(
-    entries: *const ArchiveEntry,
+    entries: *const RpgmardArchiveEntry,
     entries_len: usize,
-    engine: Engine,
-    scratch: *mut u8,
+    engine: RpgmardEngine,
+    scratch: *mut c_void,
     scratch_len: usize,
     out_buffer: *mut u8,
     out_buffer_len: usize,
-) -> Status {
+) -> RpgmardStatus {
     if entries.is_null() || out_buffer.is_null() {
-        return Status::NullArgument;
+        return RpgmardStatus::NullArgument;
     }
 
     // SAFETY: caller guarantees `entries`/`scratch` uphold `build_entries`'s safety contract for the
     // duration of this call.
     let Some(inner_entries) = (unsafe { build_entries(entries, entries_len, scratch, scratch_len) }) else {
-        return Status::ScratchTooSmall;
+        return RpgmardStatus::ScratchTooSmall;
     };
 
     let required_len = InnerDecrypter::encrypted_buffer_size(inner_entries, engine.into());
     if out_buffer_len < required_len {
-        return Status::BufferTooSmall;
+        return RpgmardStatus::BufferTooSmall;
     }
 
     // SAFETY: caller guarantees `out_buffer` points to at least `out_buffer_len` writable bytes, which we
@@ -292,5 +338,5 @@ pub unsafe extern "C" fn rpgmard_encrypt(
 
     let _ = InnerDecrypter::new().encrypt(inner_entries, engine.into(), out_buffer);
 
-    Status::Ok
+    RpgmardStatus::Ok
 }
